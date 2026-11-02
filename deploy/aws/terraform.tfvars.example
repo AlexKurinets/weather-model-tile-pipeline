@@ -1,0 +1,11 @@
+vpc_id             = "vpc-0123456789abcdef0"
+private_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0fedcba9876543210"]
+worker_ami_id      = "ami-0123456789abcdef0"
+gpu_ami_id         = "ami-0fedcba9876543210"
+worker_image       = "123456789012.dkr.ecr.us-east-1.amazonaws.com/wxtiles:1.4.0"
+tiler_image        = "123456789012.dkr.ecr.us-east-1.amazonaws.com/wxtiles-lambda:1.4.0"
+db_password        = "change-me"
+alert_email        = "maps-alerts@example.com"
+# One entry per NOAA Open Data bucket to ingest by notification (GFS, HRRR, GEFS, MRMS, GOES-19,
+# GOES-18); copy each topic ARN from that bucket's page on the Registry of Open Data on AWS.
+noaa_topic_arns = []

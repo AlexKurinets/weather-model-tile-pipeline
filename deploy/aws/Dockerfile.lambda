@@ -1,0 +1,6 @@
+# The tiler as a Lambda container image: the same app, run by the AWS Lambda Web Adapter extension,
+# which turns function URL invocations into HTTP requests to uvicorn.
+FROM wxtiles:local
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.8.4 /lambda-adapter /opt/extensions/lambda-adapter
+ENV PORT=8000 AWS_LWA_READINESS_CHECK_PATH=/healthz
+CMD ["uvicorn", "wxtiles.api:app", "--host", "0.0.0.0", "--port", "8000"]

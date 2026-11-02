@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pipeline status</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="status-page">
+  <header class="top">
+    <h1>Pipeline status</h1>
+    <nav><span class="muted">Clock <strong id="clock">-</strong></span><a href="index.html">Model maps</a></nav>
+  </header>
+  <main>
+    <section class="kpis" id="kpis" aria-label="Pipeline totals"></section>
+    <section class="card">
+      <h2>Feeds</h2>
+      <table>
+        <thead><tr>
+          <th>Feed</th><th>Default run</th><th class="num">Age</th><th>Newest run</th><th>Progress</th>
+          <th class="num">Downloaded</th><th class="num">From fallback</th><th class="num">Ingest p50</th><th>Notes</th>
+        </tr></thead>
+        <tbody id="feeds"></tbody>
+      </table>
+    </section>
+    <section class="card">
+      <h2>Events</h2>
+      <table>
+        <thead><tr><th>Time</th><th>Event</th><th>Feed</th><th>Run</th><th>Detail</th></tr></thead>
+        <tbody id="events"></tbody>
+      </table>
+    </section>
+  </main>
+  <script src="status.js"></script>
+</body>
+</html>

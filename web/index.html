@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Model maps</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="map-page">
+  <header class="top">
+    <h1>Model maps</h1>
+    <nav><a href="status.html" id="status-link">Pipeline status</a></nav>
+  </header>
+  <main class="layout">
+    <aside class="panel" aria-label="Map controls">
+      <label class="ctl">Model
+        <select id="model"></select>
+      </label>
+      <label class="ctl">Run
+        <select id="run"></select>
+      </label>
+      <div id="run-note" class="note" hidden></div>
+      <div class="ctl">Field
+        <div id="fields" class="fields" role="radiogroup"></div>
+      </div>
+      <div class="ctl">
+        <div class="legend-title"><span id="legend-label"></span> <span id="legend-units" class="muted"></span></div>
+        <div id="legend" class="legend"></div>
+        <div id="legend-ticks" class="legend-ticks"></div>
+      </div>
+      <div class="ctl readout">
+        <span class="muted">At cursor</span>
+        <strong id="readout">move over the map</strong>
+      </div>
+      <label class="ctl">Opacity
+        <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85">
+      </label>
+    </aside>
+    <section class="mapwrap">
+      <div id="map"></div>
+      <div class="timebar">
+        <button id="play" type="button" aria-label="Play">&#9654;</button>
+        <input id="hour" type="range" min="0" max="0" step="1" value="0" aria-label="Forecast hour">
+        <span id="valid" class="valid"></span>
+      </div>
+    </section>
+  </main>
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

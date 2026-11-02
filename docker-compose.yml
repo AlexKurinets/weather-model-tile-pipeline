@@ -1,0 +1,94 @@
+name: wxtiles
+
+x-env: &env
+  DATABASE_URL: postgresql://wx:wx@db:5432/wx
+  WX_STORAGE: s3
+  WX_S3_ENDPOINT: http://s3:8333
+  WX_HTTP_MIRROR_BASE: http://s3:8333
+  WX_SIM_START: ${WX_SIM_START:-2026-10-28T20:40:00Z}
+  WX_MANIFEST_TTL: "15"
+  AWS_ACCESS_KEY_ID: wx
+  AWS_SECRET_ACCESS_KEY: wx
+  AWS_REGION: us-east-1
+  # GDAL reads COGs straight from the S3 API (SeaweedFS here, S3 in AWS) with range requests.
+  AWS_S3_ENDPOINT: s3:8333
+  AWS_HTTPS: "NO"
+  AWS_VIRTUAL_HOSTING: "FALSE"
+  GDAL_DISABLE_READDIR_ON_OPEN: EMPTY_DIR
+  VSI_CACHE: "TRUE"
+  GDAL_HTTP_MAX_RETRY: "3"
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: wx
+      POSTGRES_PASSWORD: wx
+      POSTGRES_DB: wx
+    ports: ["${DB_PORT:-5522}:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wx"]
+      interval: 3s
+      retries: 20
+
+  # S3-compatible object store standing in for S3 and for the upstream mirrors (NOAA's buckets,
+  # NOMADS, ECMWF, DWD and MSC are buckets here; the HTTP mirrors are read over plain HTTP).
+  s3:
+    image: chrislusf/seaweedfs:4.42
+    command: server -s3 -dir=/data -volume.max=0 -master.volumeSizeLimitMB=256
+    ports: ["${S3_PORT:-9210}:8333"]
+    volumes: [s3data:/data]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/ || exit 1"]
+      interval: 3s
+      retries: 30
+
+  seed:
+    build: .
+    image: wxtiles:local
+    command: wxtiles seed
+    environment: *env
+    depends_on:
+      db: {condition: service_healthy}
+      s3: {condition: service_healthy}
+    restart: "no"
+
+  worker:
+    image: wxtiles:local
+    command: wxtiles worker --processes 4
+    environment:
+      <<: *env
+      WX_WARM_URL: http://cdn
+    depends_on:
+      seed: {condition: service_completed_successfully}
+    restart: unless-stopped
+
+  tiler:
+    image: wxtiles:local
+    command: uvicorn wxtiles.api:app --host 0.0.0.0 --port 8000 --workers 4
+    environment: *env
+    ports: ["${TILER_PORT:-8211}:8000"]
+    depends_on:
+      seed: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # Stands in for CloudFront: caches tiles for as long as their Cache-Control says (a year) and
+  # manifests for WX_MANIFEST_TTL, and serves the map and the status page.
+  cdn:
+    image: nginx:1.27.4-alpine
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web:/usr/share/nginx/html:ro
+    ports: ["${WEB_PORT:-8210}:80"]
+    depends_on:
+      tiler: {condition: service_healthy}
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  s3data:

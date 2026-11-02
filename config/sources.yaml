@@ -1,0 +1,363 @@
+# Source registry. One entry per model or observation feed; adding a feed that follows an
+# existing layout is an entry here plus its QC limits, not new code.
+#
+# posting: minutes after the cycle (or frame) time that the first step is expected upstream,
+#          minutes between steps, and minutes of grace past a step's expected time before a
+#          step that no mirror has is marked missing (which holds the run).
+# Grids are the synthetic grids the seed writes. The decoder never reads them: it builds every
+# grid from the GRIB2 or netCDF metadata and QC fails the step if that disagrees with this file.
+
+mirrors:
+  noaa-aws:     {protocol: s3,   bucket: noaa-aws}       # NOAA Open Data Dissemination buckets on S3
+  noaa-nomads:  {protocol: http, bucket: noaa-nomads}    # NOMADS over HTTPS, rate limited, fallback only
+  noaa-gcp:     {protocol: http, bucket: noaa-gcp}       # the same NODD objects on a second cloud
+  ecmwf-portal: {protocol: http, bucket: ecmwf-portal}   # data.ecmwf.int open data
+  ecmwf-aws:    {protocol: s3,   bucket: ecmwf-aws}      # ECMWF open data mirror on S3
+  dwd-opendata: {protocol: http, bucket: dwd-opendata}   # opendata.dwd.de
+  msc-datamart: {protocol: http, bucket: msc-datamart}   # MSC Datamart
+  internal:     {protocol: s3,   bucket: wx-internal}    # our own AI model output
+
+grids:
+  global_1p0_0e_ns:   {type: latlon, nx: 360, ny: 181, lon0: 0.0,    lat0: 90.0,  dlon: 1.0, dlat: -1.0}
+  global_1p0_180w_ns: {type: latlon, nx: 360, ny: 181, lon0: -180.0, lat0: 90.0,  dlon: 1.0, dlat: -1.0}
+  global_1p0_180w_sn: {type: latlon, nx: 360, ny: 181, lon0: -180.0, lat0: -90.0, dlon: 1.0, dlat: 1.0}
+  global_1p0_0e_sn:   {type: latlon, nx: 360, ny: 181, lon0: 0.0,    lat0: -90.0, dlon: 1.0, dlat: 1.0}
+  conus_lcc_12km:     {type: lambert, nx: 450, ny: 265, la1: 21.138123, lo1: 237.280472, lov: 262.5,
+                       latin1: 38.5, latin2: 38.5, dx: 12000, dy: 12000, radius: 6371229}
+  conus_lcc_15km:     {type: lambert, nx: 360, ny: 212, la1: 21.138123, lo1: 237.280472, lov: 262.5,
+                       latin1: 38.5, latin2: 38.5, dx: 15000, dy: 15000, radius: 6371229}
+  ndfd_lcc_15km:      {type: lambert, nx: 397, ny: 270, la1: 19.229, lo1: 233.7234, lov: 265.0,
+                       latin1: 25.0, latin2: 25.0, dx: 15000, dy: 15000, radius: 6371200}
+  mrms_conus_0p07:    {type: latlon, nx: 1000, ny: 500, lon0: 230.035, lat0: 54.965, dlon: 0.07, dlat: -0.07}
+  goes_east_conus:    {type: geos, lon_0: -75.0, h: 35786023.0, nx: 560, ny: 336,
+                       x0: -0.101332, x1: 0.038612, y0: 0.128212, y1: 0.044268}
+  goes_west_pacus:    {type: geos, lon_0: -137.0, h: 35786023.0, nx: 560, ny: 336,
+                       x0: -0.063, x1: 0.077, y0: 0.128212, y1: 0.044268}
+
+sources:
+  # ---------------------------------------------------------------- global deterministic
+  - id: gfs
+    name: GFS
+    center: NCEP
+    category: global
+    kind: forecast
+    layout: indexed          # one file per step, many GRIB2 messages, wgrib2 .idx beside it
+    index: wgrib2
+    grid: global_1p0_0e_ns
+    cycles: [0, 6, 12, 18]
+    fhours: [0, 120, 6]
+    keep_cycles: 2
+    posting: {first: 208, step: 2.0, grace: 45}
+    mirrors: [noaa-aws, noaa-nomads]
+    notify: true
+    path: "gfs.{ymd}/{hh}/atmos/gfs.t{hh}z.pgrb2.1p00.f{fff}"
+    fields: [t2m, mslp, qpf, wind10]
+    precip: {style: bucket, hours: 6}
+    synth: {speed: 1.04, t_bias: 0.8, noise: [0.3, 0.045], precip_scale: 1.12, filler: 25}
+
+  - id: ifs
+    name: ECMWF IFS
+    center: ECMWF
+    category: global
+    kind: forecast
+    layout: indexed
+    index: ecmwf             # JSON-lines .index with _offset and _length
+    grid: global_1p0_180w_ns
+    cycles: [0, 6, 12, 18]
+    fhours: [0, 120, 6]
+    keep_cycles: 2
+    posting: {first: 400, step: 1.0, grace: 60}
+    mirrors: [ecmwf-portal, ecmwf-aws]
+    notify: false
+    path: "{ymd}/{hh}z/ifs/oper/{ymd}{hh}0000-{f}h-oper-fc.grib2"
+    fields: [t2m, mslp, qpf, wind10]
+    precip: {style: total}
+    synth: {speed: 1.0, t_bias: -0.3, noise: [0.25, 0.03], precip_scale: 1.0, filler: 25}
+
+  - id: icon
+    name: ICON
+    center: DWD
+    category: global
+    kind: forecast
+    layout: per_field        # one bzip2-compressed GRIB2 file per variable per step
+    compression: bzip2
+    grid: global_1p0_180w_sn
+    cycles: [0, 6, 12, 18]
+    fhours: [0, 120, 6]
+    keep_cycles: 2
+    posting: {first: 150, step: 1.5, grace: 40}
+    mirrors: [dwd-opendata]
+    notify: false
+    path: "icon/grib/{hh}/{var_lc}/icon_global_regular-lat-lon_single-level_{ymd}{hh}_{fff}_{VAR}.grib2.bz2"
+    variables: {t2m: [T_2M], mslp: [PMSL], qpf: [TOT_PREC], wind10: [U_10M, V_10M]}
+    fields: [t2m, mslp, qpf, wind10]
+    precip: {style: total}
+    synth: {speed: 0.98, t_bias: 0.4, noise: [0.3, 0.04], precip_scale: 0.95}
+
+  - id: gdps
+    name: CMC GDPS
+    center: MSC
+    category: global
+    kind: forecast
+    layout: per_field
+    grid: global_1p0_0e_sn
+    cycles: [0, 12]
+    fhours: [0, 120, 6]
+    keep_cycles: 2
+    posting: {first: 220, step: 1.5, grace: 40}
+    mirrors: [msc-datamart]
+    notify: false
+    path: "{ymd}/WXO-DD/model_gem_global/latlon/{hh}/{fff}/CMC_glb_{VAR}_latlon_{ymd}{hh}_P{fff}.grib2"
+    variables: {t2m: [TMP_TGL_2], mslp: [PRMSL_MSL_0], qpf: [APCP_SFC_0], wind10: [UGRD_TGL_10, VGRD_TGL_10]}
+    fields: [t2m, mslp, qpf, wind10]
+    precip: {style: total}
+    synth: {speed: 0.96, t_bias: -0.9, noise: [0.35, 0.05], precip_scale: 0.9}
+
+  # ---------------------------------------------------------------- AI models
+  - id: aifs
+    name: ECMWF AIFS
+    center: ECMWF
+    category: ai
+    kind: forecast
+    layout: indexed
+    index: ecmwf
+    grid: global_1p0_180w_ns
+    cycles: [0, 6, 12, 18]
+    fhours: [0, 120, 6]
+    keep_cycles: 2
+    posting: {first: 355, step: 0.5, grace: 60}
+    mirrors: [ecmwf-portal, ecmwf-aws]
+    notify: false
+    path: "{ymd}/{hh}z/aifs-single/oper/{ymd}{hh}0000-{f}h-oper-fc.grib2"
+    fields: [t2m, mslp, qpf, wind10]
+    precip: {style: total}
+    synth: {speed: 1.01, t_bias: 0.2, noise: [0.2, 0.028], precip_scale: 0.85, smooth: 2.0, filler: 10}
+
+  - id: graphcast
+    name: GraphCast-GFS
+    center: NCEP
+    category: ai
+    kind: forecast
+    layout: indexed
+    index: wgrib2
+    grid: global_1p0_0e_ns
+    cycles: [0, 6, 12, 18]
+    fhours: [0, 120, 6]
+    keep_cycles: 2
+    posting: {first: 275, step: 0.2, grace: 60}
+    mirrors: [noaa-aws, noaa-nomads]
+    notify: true
+    path: "graphcastgfs.{ymd}/{hh}/graphcastgfs.t{hh}z.pgrb2.f{fff}"
+    fields: [t2m, mslp, qpf, wind10]
+    precip: {style: bucket, hours: 6}
+    synth: {speed: 1.02, t_bias: 0.5, noise: [0.25, 0.032], precip_scale: 0.8, smooth: 2.5, filler: 10}
+
+  - id: pangu
+    name: Pangu-Weather
+    center: in-house
+    category: ai
+    kind: forecast
+    layout: indexed
+    index: wgrib2
+    grid: global_1p0_0e_ns
+    cycles: [0, 6, 12, 18]
+    fhours: [0, 120, 6]
+    keep_cycles: 2
+    # Not posted upstream: an ai_run job writes it after the matching GFS analysis is ingested.
+    trigger: {source: gfs, step: f000, delay: 6}
+    posting: {first: 220, step: 0.1, grace: 90}
+    mirrors: [internal]
+    notify: true
+    path: "pangu.{ymd}/{hh}/pangu.t{hh}z.f{fff}.grib2"
+    fields: [t2m, mslp, wind10]      # Pangu-Weather has no precipitation output
+    synth: {speed: 1.03, t_bias: 0.6, noise: [0.25, 0.036], precip_scale: 0.0, smooth: 2.5, filler: 8}
+
+  # ---------------------------------------------------------------- regional / convection-allowing
+  - id: hrrr
+    name: HRRR
+    center: NCEP
+    category: regional
+    kind: forecast
+    layout: indexed
+    index: wgrib2
+    grid: conus_lcc_12km
+    cycles: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+    fhours: [0, 18, 1]
+    keep_cycles: 2
+    posting: {first: 50, step: 1.5, grace: 30}
+    mirrors: [noaa-aws, noaa-nomads]
+    notify: true
+    path: "hrrr.{ymd}/conus/hrrr.t{hh}z.wrfsfcf{ff}.grib2"
+    idx_names: {mslp: "MSLMA:mean sea level"}   # HRRR carries MSLMA, not PRMSL
+    fields: [t2m, mslp, qpf, wind10, refc]
+    precip: {style: total}
+    synth: {speed: 1.0, t_bias: 0.3, noise: [0.3, 0.12], precip_scale: 1.05, filler: 25, hourly_window: true}
+
+  - id: nam
+    name: NAM 3 km
+    center: NCEP
+    category: regional
+    kind: forecast
+    layout: indexed
+    index: wgrib2
+    grid: conus_lcc_15km
+    cycles: [0, 6, 12, 18]
+    fhours: [0, 60, 3]
+    keep_cycles: 2
+    posting: {first: 95, step: 1.5, grace: 30}
+    mirrors: [noaa-aws, noaa-nomads]
+    notify: true
+    path: "nam.{ymd}/nam.t{hh}z.conusnest.hiresf{ff}.tm00.grib2"
+    fields: [t2m, mslp, qpf, wind10, refc]
+    precip: {style: bucket, hours: 3}
+    synth: {speed: 0.97, t_bias: -1.2, noise: [0.35, 0.07], precip_scale: 1.25, filler: 20}
+
+  - id: nbm
+    name: NBM
+    center: NCEP
+    category: regional
+    kind: forecast
+    layout: indexed
+    index: wgrib2
+    grid: ndfd_lcc_15km
+    cycles: [1, 7, 13, 19]
+    fhours: [0, 72, 6]
+    keep_cycles: 2
+    posting: {first: 75, step: 1.0, grace: 30}
+    mirrors: [noaa-aws, noaa-nomads]
+    notify: true
+    path: "blend.{ymd}/{hh}/core/blend.t{hh}z.core.f{fff}.co.grib2"
+    fields: [t2m, qpf, wind10]
+    precip: {style: bucket, hours: 6}
+    synth: {speed: 1.0, t_bias: 0.0, noise: [0.15, 0.025], precip_scale: 0.95, smooth: 1.5, filler: 15}
+
+  # ---------------------------------------------------------------- ensembles
+  - id: gefs
+    name: GEFS
+    center: NCEP
+    category: ensemble
+    kind: ensemble
+    layout: indexed
+    index: wgrib2
+    members: 10              # control plus 9 of the 30 perturbed members
+    member_layout: per_file  # one file per member per step
+    grid: global_1p0_0e_ns
+    cycles: [0, 6, 12, 18]
+    fhours: [0, 120, 6]
+    keep_cycles: 1
+    posting: {first: 280, step: 3.0, grace: 60}
+    mirrors: [noaa-aws, noaa-nomads]
+    notify: true
+    path: "gefs.{ymd}/{hh}/atmos/pgrb2a/ge{mem}.t{hh}z.pgrb2a.f{fff}"
+    fields: [t2m_mean, t2m_spread, qpf_mean, qpf_p1in]
+    member_fields: [t2m, qpf]
+    precip: {style: bucket, hours: 6}
+    synth: {speed: 1.04, t_bias: 0.8, noise: [0.3, 0.05], precip_scale: 1.1, member_spread: 0.08, filler: 6}
+
+  - id: ens
+    name: ECMWF ENS
+    center: ECMWF
+    category: ensemble
+    kind: ensemble
+    layout: indexed
+    index: ecmwf
+    members: 10              # control plus 9 of the 50 perturbed members
+    member_layout: in_file   # every member of a step in one file, picked by "number" in the .index
+    grid: global_1p0_180w_ns
+    cycles: [0, 12]
+    fhours: [0, 120, 12]
+    keep_cycles: 1
+    posting: {first: 470, step: 1.5, grace: 60}
+    mirrors: [ecmwf-portal, ecmwf-aws]
+    notify: false
+    path: "{ymd}/{hh}z/ifs/enfo/{ymd}{hh}0000-{f}h-enfo-ef.grib2"
+    fields: [t2m_mean, t2m_spread, qpf_mean, qpf_p1in]
+    member_fields: [t2m, qpf]
+    precip: {style: total}
+    synth: {speed: 1.0, t_bias: -0.3, noise: [0.25, 0.035], precip_scale: 1.0, member_spread: 0.07, filler: 4}
+
+  # ---------------------------------------------------------------- analysis and observations
+  - id: rtma
+    name: RTMA
+    center: NCEP
+    category: observed
+    kind: analysis
+    layout: indexed
+    index: wgrib2
+    grid: ndfd_lcc_15km
+    cadence: 60              # minutes between analyses
+    keep_frames: 12
+    posting: {first: 30, step: 0, grace: 30}
+    mirrors: [noaa-aws, noaa-nomads]
+    notify: true
+    path: "rtma2p5.{ymd}/rtma2p5.t{hh}z.2dvaranl_ndfd.grb2"
+    fields: [t2m, wind10]
+    synth: {speed: 1.0, t_bias: 0.0, noise: [0.1, 0.0], filler: 6}
+
+  - id: mrms
+    name: MRMS reflectivity
+    center: NCEP
+    category: observed
+    kind: observation
+    layout: single           # whole gzipped GRIB2 file, no index
+    compression: gzip
+    grid: mrms_conus_0p07
+    cadence: 10
+    keep_frames: 18
+    posting: {first: 2, step: 0, grace: 15}
+    mirrors: [noaa-aws, noaa-gcp]
+    notify: true
+    path: "CONUS/MergedReflectivityQCComposite_00.50/{ymd}/MRMS_MergedReflectivityQCComposite_00.50_{ymd}-{hh}{mm}00.grib2.gz"
+    fields: [refl]
+    synth: {speed: 1.0, t_bias: 0.0, noise: [0.0, 0.0]}
+
+  - id: goes_east
+    name: GOES-East IR
+    center: NESDIS
+    category: observed
+    kind: observation
+    layout: single
+    format: netcdf
+    satellite: GOES-19       # GOES-East moved from GOES-16 to GOES-19 in April 2025
+    grid: goes_east_conus
+    cadence: 10
+    keep_frames: 18
+    posting: {first: 3, step: 0, grace: 15}
+    mirrors: [noaa-aws, noaa-gcp]
+    notify: true
+    path: "ABI-L2-CMIPC/{year}/{doy}/{hh}/OR_ABI-L2-CMIPC-M6C13_G19_s{year}{doy}{hh}{mm}000.nc"
+    fields: [ir]
+    synth: {speed: 1.0, t_bias: 0.0, noise: [0.0, 0.0]}
+
+  - id: goes_west
+    name: GOES-West IR
+    center: NESDIS
+    category: observed
+    kind: observation
+    layout: single
+    format: netcdf
+    satellite: GOES-18
+    grid: goes_west_pacus
+    cadence: 10
+    keep_frames: 18
+    posting: {first: 3, step: 0, grace: 15}
+    mirrors: [noaa-aws, noaa-gcp]
+    notify: true
+    path: "ABI-L2-CMIPC/{year}/{doy}/{hh}/OR_ABI-L2-CMIPC-M6C13_G18_s{year}{doy}{hh}{mm}000.nc"
+    fields: [ir]
+    synth: {speed: 1.0, t_bias: 0.0, noise: [0.0, 0.0]}
+
+# QC limits, in the units the GRIB2 or netCDF file carries (before conversion for display).
+qc:
+  t2m:    {min: 185.0, max: 335.0}       # K
+  mslp:   {min: 87000.0, max: 108500.0}  # Pa
+  qpf:    {min: 0.0, max: 750.0}         # kg m-2 over the run so far
+  wind10: {min: 0.0, max: 95.0}          # m/s
+  refc:   {min: -40.0, max: 90.0}        # dBZ
+  refl:   {min: -40.0, max: 90.0}
+  ir:     {min: 150.0, max: 340.0}       # K
+  max_missing_fraction: 0.02             # share of grid points that may be missing (obs: of covered points)
+  frozen_std: 0.001                      # a field this flat is a stuck or zero-filled message
+  run_to_run:                            # mean absolute change against the previous run at the same valid time
+    t2m: 12.0                            # K
+    mslp: 1800.0                         # Pa
